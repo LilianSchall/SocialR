@@ -1,9 +1,11 @@
 use std::collections::HashSet;
-use std::ops::Receiver;
-use std::sync::{Arc, Barrier, mpsc};
+use futures::stream::StreamExt;
+use std::sync::{Arc};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
-use std::thread::sleep;
+use tokio::{
+    sync::{mpsc, Barrier},
+    time::sleep,
+};
 use std::time::Duration;
 use crate::worms::Worm;
 
@@ -39,7 +41,7 @@ impl Crawler {
         // these are the tools to establish a communication between the scraper and the worms
         let (urls_tx, urls_rx) = mpsc::channel(craw_queue_capacity);
         let (items_tx, items_rx) = mpsc::channel(procs_queue_capacity);
-        let (new_urls_tx, mut new_urls_rx) = mpsc::channel(craw_queue_capacity);
+        let (new_urls_tx, new_urls_rx) = mpsc::channel(craw_queue_capacity);
 
         let barrier = Arc::new(Barrier::new(3));
 
@@ -65,7 +67,7 @@ impl Crawler {
     }
 
     fn control_loop(&self, urls_tx: mpsc::Sender<String>,
-                    new_urls_rx: mpsc::Receiver<(String, Vec<String>)>, new_urls_tx: mpsc::Sender<(String, Vec<String>)>,
+                    mut new_urls_rx: mpsc::Receiver<(String, Vec<String>)>, new_urls_tx: mpsc::Sender<(String, Vec<String>)>,
                     visited_urls: &mut HashSet<String>, active_worms: Arc<AtomicUsize>,
                     cq_capacity: usize) {
         loop {
@@ -104,7 +106,7 @@ impl Crawler {
                 .await;
 
             barrier.wait().await;
-        })
+        });
     }
 
     fn launch_scrapers<T: Send + 'static>(&self, concurrency: usize, worm: Arc<dyn Worm<Item = T>>,
@@ -119,7 +121,7 @@ impl Crawler {
                     async {
                         active_worms.fetch_add(1, Ordering::SeqCst);
                         let mut urls = Vec::new();
-                        let res = worm.scrape(queued_url.clone())
+                        let res = worm.scrape(&queued_url.clone())
                             .await
                             .map_err(|err| {
                                 log::error!("{}", err);
