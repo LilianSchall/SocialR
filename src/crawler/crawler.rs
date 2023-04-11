@@ -94,5 +94,20 @@ impl Crawler {
     }
 
 
-    fn launch_processors
+    fn launch_processors<T: Send + 'static>(&self, concurrency: usize, worm: Arc<dyn Worm<Item = T>>,
+                                            items: mpsc::Receiver<T>, barrier: Arc<Barrier>) {
+        tokio::spawn(async move{
+            tokio_stream::wrappers::ReceiverStream::new(items)
+                .for_each_concurrent(concurrency, |item| async {
+                    let _ = worm.process(item).await;
+                })
+                .await;
+
+            barrier.wait().await;
+        })
+    }
+
+    fn launch_scrapers<T: Send + 'static>(&self) {
+
+    }
 }
